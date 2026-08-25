@@ -92,6 +92,31 @@ class BasicMockGpuTestCase(GpuTestCaseBase):
                 f"Register {reg_name} value mismatch",
             )
 
+    def test_mock_gpu_thread_extended_info(self):
+        """
+        Test that the jThreadExtendedInfo packet returns the JSON supplied by
+        ThreadMockGPU::GetExtendedInfo().
+        """
+        self.common_setup()
+        # Continue to the breakpoint after GPU is initialized.
+        lldbutil.continue_to_source_breakpoint(self, self.cpu_process, CPU_AFTER_BREAKPOINT_COMMENT, self.source_spec)
+
+        self.select_gpu()
+        gpu_thread = self.gpu_process.GetThreadAtIndex(0)
+
+        expected_items = {
+            "name": "Mock GPU Thread Name",
+            "is_active": "true",
+            "dispatch.kernel_name": "mock_gpu_kernel",
+        }
+        for path, expected_value in expected_items.items():
+            stream = lldb.SBStream()
+            self.assertTrue(
+                gpu_thread.GetInfoItemByPathAsString(path, stream),
+                f'extended thread info has a "{path}" item',
+            )
+            self.assertEqual(stream.GetData(), expected_value)
+
     def test_mock_gpu_breakpoint_hit(self):
         """Test that we can hit a breakpoint on the gpu target."""
         # Switch to the GPU target and set a breakpoint.

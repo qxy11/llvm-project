@@ -630,6 +630,14 @@ At a minimum, a thread must be specified, for example:
 jThreadExtendedInfo:{"thread":612910}
 ```
 
+Sending the packet with no JSON arguments at all is a query to find out
+whether the stub implements this packet:
+```
+jThreadExtendedInfo:
+```
+The stub replies with `OK` if the packet is supported, and with an empty
+response if it is not.
+
 Because this is a JSON string, the thread number is provided in base 10.
 Additional key-value pairs may be provided by lldb to the gdb remote
 stub.  For instance, on some versions of macOS, lldb can read offset

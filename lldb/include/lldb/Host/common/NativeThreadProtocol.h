@@ -17,7 +17,10 @@
 #include "lldb/lldb-types.h"
 
 #include "llvm/Support/Error.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/MemoryBuffer.h"
+
+#include <optional>
 
 namespace lldb_private {
 // NativeThreadProtocol
@@ -59,6 +62,30 @@ public:
   virtual llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
   GetSiginfo() const {
     return llvm::make_error<UnimplementedError>();
+  }
+
+  /// Get extended information about this thread as JSON.
+  ///
+  /// This backs the "jThreadExtendedInfo" GDB remote packet which allows a
+  /// thread to supply arbitrary extra information about itself that the
+  /// standard packets have no way to express. There are no requirements on
+  /// what the returned JSON contains.
+  ///
+  /// \param[in] args
+  ///     The JSON arguments that were decoded from the "jThreadExtendedInfo"
+  ///     packet. This is normally a dictionary containing a "thread" key that
+  ///     selects this thread, along with any extra hints the client chose to
+  ///     supply. It is an empty dictionary when the client is only asking
+  ///     whether the packet is supported.
+  ///
+  /// \return
+  ///     A JSON value that describes this thread, or std::nullopt if this
+  ///     thread has no extended information to supply. Returning std::nullopt
+  ///     causes the "jThreadExtendedInfo" packet to be reported as
+  ///     unsupported.
+  virtual std::optional<llvm::json::Value>
+  GetExtendedInfo(const llvm::json::Value &args) {
+    return std::nullopt;
   }
 
   bool HasValidStopReason();

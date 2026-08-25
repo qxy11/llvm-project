@@ -30,6 +30,29 @@ bool ThreadMockGPU::GetStopReason(ThreadStopInfo &stop_info,
   return true;
 }
 
+std::optional<llvm::json::Value>
+ThreadMockGPU::GetExtendedInfo(const llvm::json::Value &args) {
+  llvm::json::Object info{
+      {"tid", static_cast<int64_t>(GetID())},
+      {"name", GetName()},
+      {"is_active", GetIsActive()},
+      {"dispatch",
+       llvm::json::Object{
+           {"kernel_name", "mock_gpu_kernel"},
+           {"grid_size", llvm::json::Array{16, 8, 1}},
+           {"work_group_size", llvm::json::Array{4, 4, 1}},
+       }},
+      // Echo the request back so clients can verify the arguments made it to
+      // the thread intact.
+      {"request", args},
+  };
+  if (m_lane_id)
+    info["lane_id"] = static_cast<int64_t>(*m_lane_id);
+  if (m_simd_id)
+    info["simd_id"] = static_cast<int64_t>(*m_simd_id);
+  return llvm::json::Value(std::move(info));
+}
+
 Status ThreadMockGPU::SetWatchpoint(lldb::addr_t addr, size_t size,
                                     uint32_t watch_flags, bool hardware) {
   return Status::FromErrorString("unimplemented");

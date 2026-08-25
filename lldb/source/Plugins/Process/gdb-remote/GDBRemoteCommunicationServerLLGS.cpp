@@ -171,6 +171,9 @@ void GDBRemoteCommunicationServerLLGS::RegisterPacketHandlers() {
       StringExtractorGDBRemote::eServerPacketType_jThreadsInfo,
       &GDBRemoteCommunicationServerLLGS::Handle_jThreadsInfo);
   RegisterMemberFunctionHandler(
+      StringExtractorGDBRemote::eServerPacketType_jThreadExtendedInfo,
+      &GDBRemoteCommunicationServerLLGS::Handle_jThreadExtendedInfo);
+  RegisterMemberFunctionHandler(
       StringExtractorGDBRemote::eServerPacketType_qWatchpointSupportInfo,
       &GDBRemoteCommunicationServerLLGS::Handle_qWatchpointSupportInfo);
   RegisterMemberFunctionHandler(
@@ -3815,6 +3818,66 @@ GDBRemoteCommunicationServerLLGS::Handle_jThreadsInfo(
   StreamGDBRemote escaped_response;
   escaped_response.PutEscapedBytes(response.GetData(), response.GetSize());
   return SendPacketNoLock(escaped_response.GetString());
+}
+
+GDBRemoteCommunication::PacketResult
+GDBRemoteCommunicationServerLLGS::Handle_jThreadExtendedInfo(
+    StringExtractorGDBRemote &packet) {
+  Log *log = GetLog(LLDBLog::Thread);
+
+  // Ensure we have a debugged process.
+  if (!m_current_process ||
+      (m_current_process->GetID() == LLDB_INVALID_PROCESS_ID))
+    return SendErrorResponse(50);
+
+  packet.ConsumeFront("jThreadExtendedInfo:");
+
+  const char *json_args = packet.Peek();
+  if (json_args == nullptr || json_args[0] == '\0') {
+    // A "jThreadExtendedInfo:" packet with no JSON arguments is a query from
+    // the client to find out if this packet is supported. Reply with OK if a
+    // thread is able to supply extended information, and with an empty
+    // response if not.
+    NativeThreadProtocol *thread = m_current_process->GetCurrentThread();
+    if (thread == nullptr)
+      thread = m_current_process->GetThreadAtIndex(0);
+    const json::Value no_args(json::Object{});
+    if (thread && thread->GetExtendedInfo(no_args))
+      return SendOKResponse();
+    return SendUnimplementedResponse("jThreadExtendedInfo");
+  }
+
+  Expected<json::Value> args = json::parse(json_args);
+  if (!args) {
+    LLDB_LOG_ERROR(log, args.takeError(),
+                   "failed to parse jThreadExtendedInfo arguments: {0}");
+    return SendErrorResponse(
+        Status::FromErrorString("malformed jThreadExtendedInfo arguments"));
+  }
+
+  json::Object *args_dict = args->getAsObject();
+  if (args_dict == nullptr)
+    return SendErrorResponse(Status::FromErrorString(
+        "jThreadExtendedInfo arguments are not a JSON dictionary"));
+
+  // The thread ID is expressed in base 10 as required by JSON.
+  std::optional<int64_t> thread_arg = args_dict->getInteger("thread");
+  if (!thread_arg)
+    return SendErrorResponse(Status::FromErrorString(
+        "jThreadExtendedInfo arguments are missing the \"thread\" key"));
+
+  const lldb::tid_t tid = static_cast<lldb::tid_t>(*thread_arg);
+  NativeThreadProtocol *thread = m_current_process->GetThreadByID(tid);
+  if (thread == nullptr)
+    return SendErrorResponse(Status::FromErrorStringWithFormat(
+        "no thread with tid %" PRIu64 " in pid %" PRIu64, tid,
+        m_current_process->GetID()));
+
+  std::optional<json::Value> extended_info = thread->GetExtendedInfo(*args);
+  if (!extended_info)
+    return SendUnimplementedResponse("jThreadExtendedInfo");
+
+  return SendJSONResponse(*extended_info);
 }
 
 GDBRemoteCommunication::PacketResult

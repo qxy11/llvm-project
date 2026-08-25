@@ -108,6 +108,7 @@ public:
     eServerPacketType_QThreadSuffixSupported,
 
     eServerPacketType_jThreadsInfo,
+    eServerPacketType_jThreadExtendedInfo,
     eServerPacketType_qsThreadInfo,
     eServerPacketType_qfThreadInfo,
     eServerPacketType_qGetPid,

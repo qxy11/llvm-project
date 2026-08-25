@@ -35,6 +35,9 @@ public:
   bool GetStopReason(ThreadStopInfo &stop_info,
                      std::string &description) override;
 
+  std::optional<llvm::json::Value>
+  GetExtendedInfo(const llvm::json::Value &args) override;
+
   RegisterContextMockGPU &GetRegisterContext() override {
     return m_reg_context;
   }

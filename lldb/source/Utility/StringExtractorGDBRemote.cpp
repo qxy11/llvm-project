@@ -321,6 +321,8 @@ StringExtractorGDBRemote::GetServerPacketType() const {
       return eServerPacketType_jSignalsInfo;
     if (PACKET_MATCHES("jThreadsInfo"))
       return eServerPacketType_jThreadsInfo;
+    if (PACKET_STARTS_WITH("jThreadExtendedInfo:"))
+      return eServerPacketType_jThreadExtendedInfo;
     if (PACKET_MATCHES("jGPUPluginInitialize"))
       return eServerPacketType_jGPUPluginInitialize;
     if (PACKET_STARTS_WITH("jGPUPluginBreakpointHit:"))
