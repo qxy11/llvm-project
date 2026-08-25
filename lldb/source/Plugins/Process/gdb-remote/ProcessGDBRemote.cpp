@@ -2831,7 +2831,7 @@ StateType ProcessGDBRemote::SetThreadStopInfo(StringExtractor &stop_packet) {
         if (!value.getAsInteger(0, tmp_id))
           simd_id = tmp_id;
       } else if (key.compare("inactive") == 0) {
-        active = false;
+        active = value == "0";
       } else if (key.size() == 2 && ::isxdigit(key[0]) && ::isxdigit(key[1])) {
         uint32_t reg = UINT32_MAX;
         if (!key.getAsInteger(16, reg))

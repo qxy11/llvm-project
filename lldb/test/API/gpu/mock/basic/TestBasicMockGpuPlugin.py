@@ -218,3 +218,26 @@ class BasicMockGpuTestCase(GpuTestCaseBase):
         self.assertTrue(cpu_thread.IsValid())
         self.assertEqual(cpu_thread.GetLaneID(), lldb.LLDB_INVALID_LANE_ID)
         self.assertEqual(cpu_thread.GetSIMD(), lldb.LLDB_INVALID_SIMD_ID)
+
+    def test_mock_gpu_active_state(self):
+        """
+        Test that the inactive state of a GPU thread reaches the client.
+        """
+        self.common_setup()
+
+        # Continue to the breakpoint after GPU is initialized.
+        lldbutil.continue_to_source_breakpoint(
+            self, self.cpu_process, CPU_AFTER_BREAKPOINT_COMMENT, self.source_spec
+        )
+
+        # ProcessMockGPU::UpdateThreads() marks its single thread inactive.
+        self.select_gpu()
+        gpu_thread = self.gpu_process.GetThreadAtIndex(0)
+        self.assertTrue(gpu_thread.IsValid())
+        self.assertFalse(gpu_thread.IsActive())
+
+        # CPU threads are always active.
+        self.select_cpu()
+        cpu_thread = self.cpu_process.GetThreadAtIndex(0)
+        self.assertTrue(cpu_thread.IsValid())
+        self.assertTrue(cpu_thread.IsActive())

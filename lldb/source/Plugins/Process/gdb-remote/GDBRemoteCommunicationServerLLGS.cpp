@@ -942,8 +942,11 @@ GDBRemoteCommunicationServerLLGS::PrepareStopReplyPacketForThread(
   if (std::optional<lldb::tid_t> simd_id = thread.GetSIMD())
     response.Format("simd:{0};", *simd_id);
 
+  // This must be sent as a key:value pair. The client parses stop replies with
+  // StringExtractor::GetNameColonValue(), which requires a colon, and a bare
+  // key would be folded into the following one.
   if (!thread.GetIsActive())
-    response.PutCString("inactive;");
+    response.PutCString("inactive:1;");
 
   // Include the thread name if there is one.
   const std::string thread_name = thread.GetName();

@@ -55,6 +55,16 @@ public:
 
   amd_dbgapi_wave_id_t GetWaveID() { return m_wave_id; }
 
+  /// Returns true if \a lane_id is active in this wave's execution mask.
+  ///
+  /// EXEC_MASK bit N maps to lane N, with the least significant bit being
+  /// lane 0. The mask can only be queried while the wave is stopped, so a
+  /// running wave keeps whatever state it last reported.
+  bool IsLaneActive(amd_dbgapi_lane_id_t lane_id) const {
+    assert(lane_id < 64 && "the EXEC mask only has 64 bits");
+    return (m_wave_info.exec_mask >> lane_id) & 1;
+  }
+
   bool GetStopReason(ThreadStopInfo &stop_info, std::string &description) {
     stop_info = m_stop_info;
     description = m_stop_description;

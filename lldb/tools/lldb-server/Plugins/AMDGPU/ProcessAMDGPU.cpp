@@ -688,6 +688,18 @@ void ProcessAMDGPU::UpdateThreadListFromWaves() {
     assert(m_waves.count(wave_id) && "New wave not in m_waves");
     m_waves.at(wave_id)->AddThreadsToList(*this, m_threads);
   }
+
+  // Refresh the active state of every lane. A lane is active only if its bit
+  // is set in its wave's EXEC mask, and divergent control flow can change that
+  // at any stop, so this has to be re-applied to existing threads too and not
+  // just to the ones that were created above.
+  for (const auto &t : m_threads) {
+    ThreadAMDGPU &thread = static_cast<ThreadAMDGPU &>(*t);
+    if (thread.IsShadowThread())
+      continue;
+    thread.SetIsActive(
+        thread.GetWave()->IsLaneActive(thread.GetDbgApiLaneID()));
+  }
 }
 
 template <typename T>
@@ -796,6 +808,26 @@ ProcessAMDGPU::GetWaveList(size_t *count, amd_dbgapi_changed_t *changed) {
   return DbgApiClientMemoryPtr<amd_dbgapi_wave_id_t>(wave_list);
 }
 
+void ProcessAMDGPU::RefreshLiveWaveInfo(const amd_dbgapi_wave_id_t *wave_list,
+                                        size_t count) {
+  Log *log = GetLog(GDBRLog::Plugin);
+
+  for (size_t i = 0; i < count; ++i) {
+    amd_dbgapi_wave_id_t wave_id = wave_list[i];
+    auto pos = m_waves.find(wave_id);
+    if (pos == m_waves.end())
+      continue;
+
+    if (llvm::Expected<DbgApiWaveInfo> wave_info = GetWaveInfo(wave_id)) {
+      pos->second->SetDbgApiInfo(*wave_info);
+    } else {
+      LLDB_LOG_ERROR(log, wave_info.takeError(),
+                     "Failed to refresh wave info for wave {1}. {0}.",
+                     wave_id.handle);
+    }
+  }
+}
+
 WaveIdList ProcessAMDGPU::UpdateWavesAndReturnNew() {
   Log *log = GetLog(GDBRLog::Plugin);
 
@@ -813,6 +845,10 @@ WaveIdList ProcessAMDGPU::UpdateWavesAndReturnNew() {
 
   if (changed == AMD_DBGAPI_CHANGED_NO) {
     LLDB_LOGF(log, "No changes in wave list");
+    // The set of waves is unchanged, but their EXEC masks are not: divergent
+    // control flow changes which lanes are active at every stop. Refresh the
+    // cached info anyway so lane active state does not go stale.
+    RefreshLiveWaveInfo(wave_list, count);
     return {};
   }
 

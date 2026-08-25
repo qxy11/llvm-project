@@ -108,6 +108,13 @@ See also :py:class:`SBFrame` ."
 ) lldb::SBThread::GetSIMD;
 
 %feature("docstring", "
+    Returns true if this thread is currently active.  For GPU lanes this
+    reflects the execution mask; a lane of a stopped SIMD group is inactive when
+    divergent control flow has masked it off, and its variables are unavailable
+    while it is inactive."
+) lldb::SBThread::IsActive;
+
+%feature("docstring", "
     Return the queue name associated with this thread, if any, as a str.
     For example, with a libdispatch (aka Grand Central Dispatch) queue."
 ) lldb::SBThread::GetQueueName;

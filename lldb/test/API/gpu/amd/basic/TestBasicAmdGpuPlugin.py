@@ -159,9 +159,9 @@ class BasicAmdGpuTestCase(AmdGpuTestCaseBase):
         self.assertEqual(len(gpu_threads), total_num_threads)
 
         # Since all the threads are in the same wave, they all share the same pc
-        # and should be stopped at the same breakpoint. At some point, we need to
-        # represent active/inactive threads in lldb, but that support does not yet
-        # exist.
+        # and are stopped at the same breakpoint, even though divergence means
+        # only one of them is actually executing it. Which lanes are active is
+        # covered by test_lane_active_state.
         self.assertEqual(len(gpu_threads_at_bp), total_num_threads)
 
     def test_no_unexpected_stop(self):
@@ -281,6 +281,11 @@ class BasicAmdGpuTestCase(AmdGpuTestCaseBase):
         lane_ids = sorted(thread.GetLaneID() for thread in gpu_threads)
         self.assertEqual(lane_ids, list(range(num_expected_threads)))
 
+        # Control flow has converged at this line: every work item satisfies
+        # "idx < size", so every lane is active in the wave's EXEC mask.
+        inactive = [t.GetLaneID() for t in gpu_threads if not t.IsActive()]
+        self.assertEqual(inactive, [], "all lanes should be active at this line")
+
         # A CPU thread is neither a lane nor part of a SIMD group. Note that
         # lane 0 is a real lane above, so these must be checked against the
         # dedicated invalid values rather than against zero. The CPU process is
@@ -291,3 +296,31 @@ class BasicAmdGpuTestCase(AmdGpuTestCaseBase):
         self.assertTrue(cpu_thread.IsValid(), "CPU thread should be valid")
         self.assertEqual(cpu_thread.GetLaneID(), lldb.LLDB_INVALID_LANE_ID)
         self.assertEqual(cpu_thread.GetSIMD(), lldb.LLDB_INVALID_SIMD_ID)
+
+    def test_lane_active_state(self):
+        """Test that a lane masked off by divergent control flow is inactive."""
+        self.build()
+
+        # This breakpoint is inside a switch on the thread index, so only the
+        # lane matching that case is active in the wave's EXEC mask.
+        source = "hello_world.hip"
+        gpu_threads_at_bp = self.run_to_gpu_breakpoint(
+            source, "// DIVERGENT BREAKPOINT"
+        )
+        self.assertNotEqual(
+            None, gpu_threads_at_bp, "GPU should be stopped at breakpoint"
+        )
+
+        gpu_threads = self.gpu_process.threads
+        active = sorted(t.GetLaneID() for t in gpu_threads if t.IsActive())
+        inactive = sorted(t.GetLaneID() for t in gpu_threads if not t.IsActive())
+
+        # The marker sits on "case 7", so lane 7 is the one that is executing.
+        self.assertEqual(active, [7], f"active={active} inactive={inactive}")
+        self.assertEqual(len(inactive), len(gpu_threads) - 1)
+
+        # An inactive lane is still a real lane with a real wave; it is only
+        # masked off, not absent.
+        for thread in gpu_threads:
+            self.assertNotEqual(thread.GetLaneID(), lldb.LLDB_INVALID_LANE_ID)
+            self.assertNotEqual(thread.GetSIMD(), lldb.LLDB_INVALID_SIMD_ID)
