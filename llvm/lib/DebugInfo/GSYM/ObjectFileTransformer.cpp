@@ -66,19 +66,21 @@ static std::vector<uint8_t> getUUID(const object::ObjectFile &Obj) {
   return UUID;
 }
 
-llvm::Error ObjectFileTransformer::convert(const object::ObjectFile &Obj,
-                                           OutputAggregator &Out,
-                                           GsymCreator &Gsym) {
+/// Add a FunctionInfo to \a Gsym for every function symbol in \a Obj's symbol
+/// table that falls inside the text ranges \a Gsym knows about.
+///
+/// \param CopyStrings If true, symbol names are copied into the GSYM string
+///        table. This is required when \a Obj's backing buffer does not outlive
+///        the conversion, as is the case for the object decompressed out of
+///        .gnu_debugdata.
+static llvm::Error loadSymbolTable(const object::ObjectFile &Obj,
+                                   OutputAggregator &Out, GsymCreator &Gsym,
+                                   bool CopyStrings) {
   using namespace llvm::object;
 
   const bool IsMachO = isa<MachOObjectFile>(&Obj);
   const bool IsELF = isa<ELFObjectFileBase>(&Obj);
 
-  // Read build ID.
-  Gsym.setUUID(getUUID(Obj));
-
-  // Parse the symbol table.
-  size_t NumBefore = Gsym.getNumFunctionInfos();
   for (const object::SymbolRef &Sym : Obj.symbols()) {
     Expected<SymbolRef::Type> SymType = Sym.getType();
     if (!SymType) {
@@ -94,7 +96,6 @@ llvm::Error ObjectFileTransformer::convert(const object::ObjectFile &Obj,
         !Gsym.IsValidTextAddress(*AddrOrErr))
       continue;
     // Function size for MachO files will be 0
-    constexpr bool NoCopy = false;
     const uint64_t size = IsELF ? ELFSymbolRef(Sym).getSize() : 0;
     Expected<StringRef> Name = Sym.getName();
     if (!Name) {
@@ -110,11 +111,63 @@ llvm::Error ObjectFileTransformer::convert(const object::ObjectFile &Obj,
     if (IsMachO)
       Name->consume_front("_");
     Gsym.addFunctionInfo(
-        FunctionInfo(*AddrOrErr, size, Gsym.insertString(*Name, NoCopy)));
+        FunctionInfo(*AddrOrErr, size, Gsym.insertString(*Name, CopyStrings)));
   }
+  return Error::success();
+}
+
+llvm::Error ObjectFileTransformer::convert(const object::ObjectFile &Obj,
+                                           OutputAggregator &Out,
+                                           GsymCreator &Gsym) {
+  using namespace llvm::object;
+
+  // Read build ID.
+  Gsym.setUUID(getUUID(Obj));
+
+  // Parse the symbol table.
+  size_t NumBefore = Gsym.getNumFunctionInfos();
+  // The main object's buffer outlives the conversion, so its names can be
+  // referenced in place.
+  if (Error E = loadSymbolTable(Obj, Out, Gsym, /*CopyStrings=*/false))
+    return E;
   size_t FunctionsAddedCount = Gsym.getNumFunctionInfos() - NumBefore;
   if (Out.GetOS())
     *Out.GetOS() << "Loaded " << FunctionsAddedCount
                  << " functions from symbol table.\n";
+
+  // A stripped ELF binary may carry MiniDebugInfo: an xz-compressed ELF object
+  // in .gnu_debugdata whose .symtab holds the function symbols that were
+  // stripped out of the main object. Those symbols are the only source of
+  // names for non-exported functions, so pull them in as well.
+  const auto *ELFObj = dyn_cast<ELFObjectFileBase>(&Obj);
+  if (!ELFObj || !ELFObj->hasGnuDebugDataSection())
+    return Error::success();
+
+  Expected<OwningBinary<ObjectFile>> DebugDataObj =
+      ELFObj->getGnuDebugDataObjectFile();
+  if (!DebugDataObj) {
+    // MiniDebugInfo is a bonus, not a requirement: warn and keep the symbols we
+    // already have rather than failing the whole conversion. Stringify the
+    // error eagerly, since Report() only runs the callback when it has a
+    // stream to write to and the error must be consumed either way.
+    std::string ErrMsg = toString(DebugDataObj.takeError());
+    Out.Report(
+        "Failed to load the .gnu_debugdata section", [&](raw_ostream &OS) {
+          OS << "warning: unable to read the .gnu_debugdata section: " << ErrMsg
+             << "\n";
+        });
+    return Error::success();
+  }
+
+  NumBefore = Gsym.getNumFunctionInfos();
+  // The decompressed buffer dies with DebugDataObj at the end of this function,
+  // so these names must be copied into the string table.
+  if (Error E = loadSymbolTable(*DebugDataObj->getBinary(), Out, Gsym,
+                                /*CopyStrings=*/true))
+    return E;
+  FunctionsAddedCount = Gsym.getNumFunctionInfos() - NumBefore;
+  if (Out.GetOS())
+    *Out.GetOS() << "Loaded " << FunctionsAddedCount
+                 << " functions from .gnu_debugdata symbol table.\n";
   return Error::success();
 }

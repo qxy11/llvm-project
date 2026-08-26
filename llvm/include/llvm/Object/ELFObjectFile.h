@@ -116,6 +116,26 @@ public:
   /// Returns an empty vector if version sections do not exist.
   Expected<std::vector<VersionEntry>> readDynsymVersions() const;
 
+  /// Returns true if this object has a .gnu_debugdata section.
+  ///
+  /// .gnu_debugdata holds "MiniDebugInfo": an xz-compressed ELF object whose
+  /// .symtab contains the function symbols that were stripped out of this
+  /// object but are not exported via .dynsym. See
+  /// https://sourceware.org/gdb/current/onlinedocs/gdb.html/MiniDebugInfo.html
+  bool hasGnuDebugDataSection() const;
+
+  /// Decompresses the .gnu_debugdata section and parses the ELF object
+  /// embedded in it.
+  ///
+  /// The returned object owns the decompressed buffer, so it may outlive this
+  /// object. Note that the embedded object's allocatable sections are
+  /// SHT_NOBITS placeholders; only its symbol table carries content.
+  ///
+  /// Returns an error if there is no .gnu_debugdata section (check
+  /// hasGnuDebugDataSection() first), if LLVM was built without LZMA support,
+  /// or if decompressing or parsing the embedded object fails.
+  Expected<OwningBinary<ObjectFile>> getGnuDebugDataObjectFile() const;
+
   /// Returns a vector of all BB address maps in the object file. When
   /// `TextSectionIndex` is specified, only returns the BB address maps
   /// corresponding to the section with that index. When `PGOAnalyses`is
